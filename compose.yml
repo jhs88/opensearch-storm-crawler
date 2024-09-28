@@ -1,70 +1,132 @@
 services:
-  zookeeper:
-    image: zookeeper
-    container_name: zookeeper
-    restart: always
-    volumes:
-      - zk-logs:/logs
-      - zk-data:/data
-      - zk-datalog:/datalog
+  # zookeeper:
+  #   image: zookeeper
+  #   container_name: zookeeper
+  #   restart: always
+  #   networks:
+  #     - opensearch-net
+  #   volumes:
+  #     - zk-logs:/logs
+  #     - zk-data:/data
+  #     - zk-datalog:/datalog
 
-  nimbus:
-    image: storm:2.6-jre17
-    container_name: nimbus
-    depends_on:
-      - zookeeper
-    restart: always
-    volumes:
-      - storm-nimbus-logs:/logs
-    command: storm nimbus
+  # nimbus:
+  #   image: storm:2.6-jre17
+  #   container_name: nimbus
+  #   depends_on:
+  #     - zookeeper
+  #   restart: always
+  #   networks:
+  #     - opensearch-net
+  #   volumes:
+  #     - storm-nimbus-logs:/logs
+  #   command: storm nimbus
 
-  supervisor:
-    image: storm:2.6-jre17
-    container_name: supervisor
-    depends_on:
-      - nimbus
-      - zookeeper
-    restart: always
-    volumes:
-      - storm-supervisor-logs:/logs
-    command: storm supervisor -c worker.childopts=-Xmx%HEAP-MEM%m
+  # supervisor:
+  #   image: storm:2.6-jre17
+  #   container_name: supervisor
+  #   depends_on:
+  #     - nimbus
+  #     - zookeeper
+  #   restart: always
+  #   networks:
+  #     - opensearch-net
+  #   volumes:
+  #     - storm-supervisor-logs:/logs
+  #   command: storm supervisor -c worker.childopts=-Xmx%HEAP-MEM%m
 
-  ui:
-    image: storm:2.6-jre17
-    container_name: ui
-    depends_on:
-      - nimbus
-    restart: always
+  # ui:
+  #   image: storm:2.6-jre17
+  #   container_name: ui
+  #   depends_on:
+  #     - nimbus
+  #   restart: always
+  #   networks:
+  #     - opensearch-net
+  #   ports:
+  #     - "127.0.0.1:8080:8080"
+  #   volumes:
+  #     - storm-ui-logs:/logs
+  #   command: storm ui
+
+  # runner:
+  #   build:
+  #     dockerfile_inline: |
+  #       FROM storm:2.6
+  #       ENV JAVA_HOME=/usr/lib/jvm/default-java
+  #       RUN apt update; \
+  #           apt install -y maven software-properties-common; \
+  #           apt autoremove && apt clean;
+  #       # alias mvn="mvn -Dmaven.repo.local=/crawldata/.repository"
+  #       USER storm
+  #   image: jhs88/storm_maven
+  #   container_name: runner
+  #   networks:
+  #     - opensearch-net
+  #   depends_on:
+  #     - nimbus
+  #   volumes:
+  #     - "./storm-crawler:/crawldata"
+  #   command: tail -f /dev/null
+
+  opensearch-node1: 
+    image: opensearchproject/opensearch:latest 
+    container_name: opensearch-node1
+    networks: [opensearch-net]
     ports:
-      - "127.0.0.1:8080:8080"
+      - 9200:9200 # REST API
+      - 9600:9600 # Performance Analyzer
+    environment:
+      - cluster.name=opensearch-cluster # Name the cluster
+      - node.name=opensearch-node1 # Name the node that will run in this container
+      - discovery.seed_hosts=opensearch-node1,opensearch-node2 # Nodes to look for when discovering the cluster
+      - cluster.initial_cluster_manager_nodes=opensearch-node1,opensearch-node2 # Nodes eligible to serve as cluster manager
+      - bootstrap.memory_lock=true # Disable JVM heap memory swapping
+      - "OPENSEARCH_JAVA_OPTS=-Xms512m -Xmx512m" # Set min and max JVM heap sizes to at least 50% of system RAM
+      - OPENSEARCH_INITIAL_ADMIN_PASSWORD=${OPENSEARCH_INITIAL_ADMIN_PASSWORD}    # Sets the demo admin user password when using demo configuration, required for OpenSearch 2.12 and later
+      # - DISABLE_SECURITY_PLUGIN=true
+    ulimits:
+      memlock:
+        soft: -1 # Set memlock to unlimited (no soft or hard limit)
+        hard: -1
+      nofile:
+        soft: 65536 # Maximum number of open files for the opensearch user - set to at least 65536
+        hard: 65536
     volumes:
-      - storm-ui-logs:/logs
-    command: storm ui
-
-  runner:
-    build:
-      dockerfile_inline: |
-        FROM storm:2.6-jre17
-        RUN apt update; \
-            apt install -y maven software-properties-common; \
-            apt autoremove && apt clean;
-        USER storm
-    image: jhs88/storm_maven
-    container_name: runner
-    depends_on:
-      - nimbus
+      - opensearch-data1:/usr/share/opensearch/data
+  
+  opensearch-node2: 
+    image: opensearchproject/opensearch:latest 
+    container_name: opensearch-node2
+    networks: [opensearch-net]
+    environment:
+      - cluster.name=opensearch-cluster
+      - node.name=opensearch-node2  
+      - discovery.seed_hosts=opensearch-node1,opensearch-node2
+      - cluster.initial_cluster_manager_nodes=opensearch-node1,opensearch-node2
+      - bootstrap.memory_lock=true
+      - "OPENSEARCH_JAVA_OPTS=-Xms512m -Xmx512m" 
+      - OPENSEARCH_INITIAL_ADMIN_PASSWORD=${OPENSEARCH_INITIAL_ADMIN_PASSWORD}
+      # - DISABLE_SECURITY_PLUGIN=true
+    ulimits:
+      memlock:
+        soft: -1 
+        hard: -1
+      nofile:
+        soft: 65536 
+        hard: 65536
     volumes:
-      - "./storm-crawler:/crawldata"
-    command: tail -f /dev/null
+      - opensearch-data2:/usr/share/opensearch/data
 
-  frontier:
-    image: crawlercommons/url-frontier
-    container_name: frontier
+  opensearch-dashboards:
+    image: opensearchproject/opensearch-dashboards:latest 
+    container_name: opensearch-dashboards
+    networks: [opensearch-net]
     ports:
-      - "127.0.0.1:7071:7071"
-    volumes:
-      - ./frontier:/crawldir
-    command: rocksdb.path=/crawldir/rocksdb
+      - 5601:5601
+    environment:
+      OPENSEARCH_HOSTS: '["https://opensearch-node1:9200","https://opensearch-node2:9200"]'
+      # DISABLE_SECURITY_DASHBOARDS_PLUGIN: true
 
 volumes:
   opensearch-data1:
@@ -75,3 +137,6 @@ volumes:
   zk-logs:
   zk-data:
   zk-datalog:
+
+networks: 
+  opensearch-net:
