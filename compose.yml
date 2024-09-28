@@ -1,0 +1,77 @@
+services:
+  zookeeper:
+    image: zookeeper
+    container_name: zookeeper
+    restart: always
+    volumes:
+      - zk-logs:/logs
+      - zk-data:/data
+      - zk-datalog:/datalog
+
+  nimbus:
+    image: storm:2.6-jre17
+    container_name: nimbus
+    depends_on:
+      - zookeeper
+    restart: always
+    volumes:
+      - storm-nimbus-logs:/logs
+    command: storm nimbus
+
+  supervisor:
+    image: storm:2.6-jre17
+    container_name: supervisor
+    depends_on:
+      - nimbus
+      - zookeeper
+    restart: always
+    volumes:
+      - storm-supervisor-logs:/logs
+    command: storm supervisor -c worker.childopts=-Xmx%HEAP-MEM%m
+
+  ui:
+    image: storm:2.6-jre17
+    container_name: ui
+    depends_on:
+      - nimbus
+    restart: always
+    ports:
+      - "127.0.0.1:8080:8080"
+    volumes:
+      - storm-ui-logs:/logs
+    command: storm ui
+
+  runner:
+    build:
+      dockerfile_inline: |
+        FROM storm:2.6-jre17
+        RUN apt update; \
+            apt install -y maven software-properties-common; \
+            apt autoremove && apt clean;
+        USER storm
+    image: jhs88/storm_maven
+    container_name: runner
+    depends_on:
+      - nimbus
+    volumes:
+      - "./storm-crawler:/crawldata"
+    command: tail -f /dev/null
+
+  frontier:
+    image: crawlercommons/url-frontier
+    container_name: frontier
+    ports:
+      - "127.0.0.1:7071:7071"
+    volumes:
+      - ./frontier:/crawldir
+    command: rocksdb.path=/crawldir/rocksdb
+
+volumes:
+  opensearch-data1:
+  opensearch-data2:
+  storm-ui-logs:
+  storm-nimbus-logs:
+  storm-supervisor-logs:
+  zk-logs:
+  zk-data:
+  zk-datalog:
