@@ -21,11 +21,10 @@ services:
       AUTO_CONNECT_CONNECTION_ID: LOCALZK 
 
   nimbus:
-    # build:
-    #   context: storm
-    #   target: base
-    # image: jhs88/storm-nimbus
-    image: storm:${STORM_VERSION}
+    build:
+      context: storm
+      target: base
+    image: jhs88/storm-nimbus
     container_name: nimbus
     hostname: nimbus
     networks: [opensearch-net]
@@ -35,11 +34,10 @@ services:
     command: storm nimbus
 
   supervisor:
-    # build:
-    #   context: storm
-    #   target: base
-    # image: jhs88/storm-supervisor
-    image: storm:${STORM_VERSION}
+    build:
+      context: storm
+      target: base
+    image: jhs88/storm-supervisor
     container_name: supervisor
     hostname: supervisor
     networks: [opensearch-net]
@@ -49,11 +47,10 @@ services:
     command: storm supervisor -c worker.childopts=-Xmx%HEAP-MEM%m
 
   ui:
-    # build:
-    #   context: storm
-    #   target: base
-    # image: jhs88/storm-ui
-    image: storm:${STORM_VERSION}
+    build:
+      context: storm
+      target: base
+    image: jhs88/storm-ui
     container_name: ui
     hostname: ui
     networks: [opensearch-net]
