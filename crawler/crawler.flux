@@ -9,38 +9,45 @@ includes:
       file: "crawler-conf.yaml"
       override: true
 
+    - resource: false
+      file: "opensearch-conf.yaml"
+      override: true
+
 spouts:
   - id: "spout"
-    className: "com.digitalpebble.stormcrawler.urlfrontier.Spout"
-    parallelism: 1
+    className: "org.apache.stormcrawler.opensearch.persistence.AggregationSpout"
+    parallelism: 10
 
 bolts:
   - id: "partitioner"
-    className: "com.digitalpebble.stormcrawler.bolt.URLPartitionerBolt"
+    className: "org.apache.stormcrawler.bolt.URLPartitionerBolt"
     parallelism: 1
   - id: "fetcher"
-    className: "com.digitalpebble.stormcrawler.bolt.FetcherBolt"
+    className: "org.apache.stormcrawler.bolt.FetcherBolt"
     parallelism: 1
   - id: "sitemap"
-    className: "com.digitalpebble.stormcrawler.bolt.SiteMapParserBolt"
-    parallelism: 1
-  - id: "feed"
-    className: "com.digitalpebble.stormcrawler.bolt.FeedParserBolt"
+    className: "org.apache.stormcrawler.bolt.SiteMapParserBolt"
     parallelism: 1
   - id: "parse"
-    className: "com.digitalpebble.stormcrawler.bolt.JSoupParserBolt"
+    className: "org.apache.stormcrawler.bolt.JSoupParserBolt"
     parallelism: 1
   - id: "shunt"
-    className: "com.digitalpebble.stormcrawler.tika.RedirectionBolt"
+    className: "org.apache.stormcrawler.tika.RedirectionBolt"
     parallelism: 1 
   - id: "tika"
-    className: "com.digitalpebble.stormcrawler.tika.ParserBolt"
+    className: "org.apache.stormcrawler.tika.ParserBolt"
     parallelism: 1
   - id: "index"
-    className: "com.digitalpebble.stormcrawler.indexing.StdOutIndexer"
+    className: "org.apache.stormcrawler.opensearch.bolt.IndexerBolt"
     parallelism: 1
   - id: "status"
-    className: "com.digitalpebble.stormcrawler.urlfrontier.StatusUpdaterBolt"
+    className: "org.apache.stormcrawler.opensearch.persistence.StatusUpdaterBolt"
+    parallelism: 1
+  - id: "deleter"
+    className: "org.apache.stormcrawler.opensearch.bolt.DeletionBolt"
+    parallelism: 1
+  - id: "status_metrics"
+    className: "org.apache.stormcrawler.opensearch.metrics.StatusMetricsBolt"
     parallelism: 1
 
 streams:
@@ -48,6 +55,12 @@ streams:
     to: "partitioner"
     grouping:
       type: SHUFFLE
+
+  - from: "__system"
+    to: "status_metrics"
+    grouping:
+      type: SHUFFLE
+      streamId: "__tick"
 
   - from: "partitioner"
     to: "fetcher"
@@ -61,11 +74,6 @@ streams:
       type: LOCAL_OR_SHUFFLE
 
   - from: "sitemap"
-    to: "feed"
-    grouping:
-      type: LOCAL_OR_SHUFFLE
-
-  - from: "feed"
     to: "parse"
     grouping:
       type: LOCAL_OR_SHUFFLE
@@ -104,13 +112,6 @@ streams:
       type: FIELDS
       args: ["url"]
       streamId: "status"
-      
-  - from: "feed"
-    to: "status"
-    grouping:
-      type: FIELDS
-      args: ["url"]
-      streamId: "status"
 
   - from: "parse"
     to: "status"
@@ -132,3 +133,9 @@ streams:
       type: FIELDS
       args: ["url"]
       streamId: "status"
+
+  - from: "status"
+    to: "deleter"
+    grouping:
+      type: LOCAL_OR_SHUFFLE
+      streamId: "deletion"

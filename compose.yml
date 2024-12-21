@@ -1,90 +1,96 @@
 services:
-  # zookeeper:
-  #   image: zookeeper
-  #   container_name: zookeeper
-  #   restart: always
-  #   networks:
-  #     - opensearch-net
-  #   volumes:
-  #     - zk-logs:/logs
-  #     - zk-data:/data
-  #     - zk-datalog:/datalog
+  zookeeper:
+    image: zookeeper
+    container_name: zookeeper
+    networks: [opensearch-net]
+    volumes:
+      - zk-logs:/logs
+      - zk-data:/data
+      - zk-datalog:/datalog
 
-  # nimbus:
-  #   image: storm:2.6-jre17
-  #   container_name: nimbus
-  #   depends_on:
-  #     - zookeeper
-  #   restart: always
-  #   networks:
-  #     - opensearch-net
-  #   volumes:
-  #     - storm-nimbus-logs:/logs
-  #   command: storm nimbus
+  zoonavigator:
+    image: elkozmon/zoonavigator:latest
+    container_name: zoonavigator
+    hostname: zoonavigator
+    networks: [opensearch-net]
+    ports: [9000:9000]
+    environment:
+      HTTP_PORT: 9000
+      CONNECTION_LOCALZK_NAME: zookeeper
+      CONNECTION_LOCALZK_CONN: zookeeper:2181
+      AUTO_CONNECT_CONNECTION_ID: LOCALZK 
 
-  # supervisor:
-  #   image: storm:2.6-jre17
-  #   container_name: supervisor
-  #   depends_on:
-  #     - nimbus
-  #     - zookeeper
-  #   restart: always
-  #   networks:
-  #     - opensearch-net
-  #   volumes:
-  #     - storm-supervisor-logs:/logs
-  #   command: storm supervisor -c worker.childopts=-Xmx%HEAP-MEM%m
+  nimbus:
+    # build:
+    #   context: storm
+    #   target: base
+    # image: jhs88/storm-nimbus
+    image: storm:${STORM_VERSION}
+    container_name: nimbus
+    hostname: nimbus
+    networks: [opensearch-net]
+    ports: [6627:6627]
+    depends_on: [zookeeper]
+    volumes: [storm-nimbus-logs:/logs]
+    command: storm nimbus
 
-  # ui:
-  #   image: storm:2.6-jre17
-  #   container_name: ui
-  #   depends_on:
-  #     - nimbus
-  #   restart: always
-  #   networks:
-  #     - opensearch-net
-  #   ports:
-  #     - "127.0.0.1:8080:8080"
-  #   volumes:
-  #     - storm-ui-logs:/logs
-  #   command: storm ui
+  supervisor:
+    # build:
+    #   context: storm
+    #   target: base
+    # image: jhs88/storm-supervisor
+    image: storm:${STORM_VERSION}
+    container_name: supervisor
+    hostname: supervisor
+    networks: [opensearch-net]
+    ports: [6700:6700]
+    depends_on: [nimbus, zookeeper]
+    volumes: [storm-supervisor-logs:/logs]
+    command: storm supervisor -c worker.childopts=-Xmx%HEAP-MEM%m
 
-  # runner:
-  #   build:
-  #     dockerfile_inline: |
-  #       FROM storm:2.6
-  #       ENV JAVA_HOME=/usr/lib/jvm/default-java
-  #       RUN apt update; \
-  #           apt install -y maven software-properties-common; \
-  #           apt autoremove && apt clean;
-  #       # alias mvn="mvn -Dmaven.repo.local=/crawldata/.repository"
-  #       USER storm
-  #   image: jhs88/storm_maven
-  #   container_name: runner
-  #   networks:
-  #     - opensearch-net
-  #   depends_on:
-  #     - nimbus
-  #   volumes:
-  #     - "./storm-crawler:/crawldata"
-  #   command: tail -f /dev/null
+  ui:
+    # build:
+    #   context: storm
+    #   target: base
+    # image: jhs88/storm-ui
+    image: storm:${STORM_VERSION}
+    container_name: ui
+    hostname: ui
+    networks: [opensearch-net]
+    ports: ["8080:8080"]
+    depends_on: [nimbus]
+    volumes: [storm-ui-logs:/logs]
+    command: storm ui 
+
+  runner:
+    build:
+      context: storm
+      target: runner
+    image: jhs88/storm-runner
+    container_name: runner
+    hostname: runner
+    networks: [opensearch-net]
+    depends_on: [nimbus]
+    volumes: [./crawler:/crawldata]
+    command: tail -f /dev/null
 
   opensearch-node1: 
-    image: opensearchproject/opensearch:latest 
+    image: opensearchproject/opensearch:latest
     container_name: opensearch-node1
     networks: [opensearch-net]
     ports:
       - 9200:9200 # REST API
       - 9600:9600 # Performance Analyzer
     environment:
-      - cluster.name=opensearch-cluster # Name the cluster
+      - cluster.name=${CLUSTER_NAME} # Name the cluster
       - node.name=opensearch-node1 # Name the node that will run in this container
-      - discovery.seed_hosts=opensearch-node1,opensearch-node2 # Nodes to look for when discovering the cluster
-      - cluster.initial_cluster_manager_nodes=opensearch-node1,opensearch-node2 # Nodes eligible to serve as cluster manager
+      - discovery.seed_hosts=${DISCOVERY_SEED_HOSTS} # Nodes to look for when discovering the cluster
+      - cluster.initial_cluster_manager_nodes=${DISCOVERY_SEED_HOSTS} # Nodes eligible to serve as cluster manager
       - bootstrap.memory_lock=true # Disable JVM heap memory swapping
       - "OPENSEARCH_JAVA_OPTS=-Xms512m -Xmx512m" # Set min and max JVM heap sizes to at least 50% of system RAM
-      - OPENSEARCH_INITIAL_ADMIN_PASSWORD=${OPENSEARCH_INITIAL_ADMIN_PASSWORD}    # Sets the demo admin user password when using demo configuration, required for OpenSearch 2.12 and later
-      # - DISABLE_SECURITY_PLUGIN=true
+      # - OPENSEARCH_INITIAL_ADMIN_PASSWORD=${OPENSEARCH_INITIAL_ADMIN_PASSWORD}    # Sets the demo admin user password when using demo configuration, required for OpenSearch 2.12 and later
+      - DISABLE_INSTALL_DEMO_CONFIG=true
+      - DISABLE_SECURITY_PLUGIN=true
     ulimits:
       memlock:
         soft: -1 # Set memlock to unlimited (no soft or hard limit)
@@ -92,22 +98,22 @@ services:
       nofile:
         soft: 65536 # Maximum number of open files for the opensearch user - set to at least 65536
         hard: 65536
-    volumes:
-      - opensearch-data1:/usr/share/opensearch/data
+    volumes: ["opensearch-data1:${OPENSEARCH_HOME}"]
   
   opensearch-node2: 
-    image: opensearchproject/opensearch:latest 
+    image: opensearchproject/opensearch:latest
     container_name: opensearch-node2
     networks: [opensearch-net]
     environment:
-      - cluster.name=opensearch-cluster
+      - cluster.name=${CLUSTER_NAME}
       - node.name=opensearch-node2  
-      - discovery.seed_hosts=opensearch-node1,opensearch-node2
-      - cluster.initial_cluster_manager_nodes=opensearch-node1,opensearch-node2
+      - discovery.seed_hosts=${DISCOVERY_SEED_HOSTS}
+      - cluster.initial_cluster_manager_nodes=${DISCOVERY_SEED_HOSTS}
       - bootstrap.memory_lock=true
       - "OPENSEARCH_JAVA_OPTS=-Xms512m -Xmx512m" 
-      - OPENSEARCH_INITIAL_ADMIN_PASSWORD=${OPENSEARCH_INITIAL_ADMIN_PASSWORD}
-      # - DISABLE_SECURITY_PLUGIN=true
+      # - OPENSEARCH_INITIAL_ADMIN_PASSWORD=${OPENSEARCH_INITIAL_ADMIN_PASSWORD}
+      - DISABLE_INSTALL_DEMO_CONFIG=true
+      - DISABLE_SECURITY_PLUGIN=true
     ulimits:
       memlock:
         soft: -1 
@@ -115,18 +121,16 @@ services:
       nofile:
         soft: 65536 
         hard: 65536
-    volumes:
-      - opensearch-data2:/usr/share/opensearch/data
+    volumes: ["opensearch-data2:${OPENSEARCH_HOME}"]
 
   opensearch-dashboards:
-    image: opensearchproject/opensearch-dashboards:latest 
+    image: opensearchproject/opensearch-dashboards:latest
     container_name: opensearch-dashboards
     networks: [opensearch-net]
-    ports:
-      - 5601:5601
+    ports: [5601:5601]
     environment:
-      OPENSEARCH_HOSTS: '["https://opensearch-node1:9200","https://opensearch-node2:9200"]'
-      # DISABLE_SECURITY_DASHBOARDS_PLUGIN: true
+      OPENSEARCH_HOSTS: '["http://opensearch-node1:9200","http://opensearch-node2:9200"]'
+      DISABLE_SECURITY_DASHBOARDS_PLUGIN: true
 
 volumes:
   opensearch-data1:
