@@ -1,0 +1,4 @@
+[submodule "crawler"]
+	path = crawler
+	url = git@github.com:jhs88/storm-crawler.git
+	branch = master
